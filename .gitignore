@@ -1,0 +1,13 @@
+# 编译器输出
+project/Objects/
+project/Listings/
+
+# Build log
+Build.log
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# IDE
+**/.vscode/
