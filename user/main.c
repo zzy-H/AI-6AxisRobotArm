@@ -46,6 +46,19 @@ void Task_UartDeal(void *pvParameters)
 /* 舵机控制任务 */
 /* last_angle 只在 Task_ServoCtrl 内使用，static 限定作用域，去掉多余 volatile */
 static uint16_t last_angle[6] = {0};// 记录上一次设置的角度，避免重复写入
+
+/* 舵机到位检测：返回 1=还有舵机在移动，0=全部到位
+ * 供状态机/动作播放等待舵机真正到位后再切下一个动作 */
+uint8_t Servo_IsMoving(void)
+{
+    for (uint8_t i = 1; i <= 5; i++)
+    {
+        if (servo_target[i] != last_angle[i])
+            return 1;   // 还有没到位的
+    }
+    return 0;
+}
+
 void Task_ServoCtrl(void *pvParameters)
 {
     while (1)
@@ -139,8 +152,15 @@ void Task_ActionPlay(void *pvParameters)
             /* 步进电机：目标位置 - 当前位置 = 需要转的步数 */
             stepper_target = p_list[action_play_idx].stepper - g_stepper_pos;
 
-            // 等舵机转到目标位置
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            /* 等舵机到位再播下一条（替代固定延时，带 3 秒超时保护） */
+            {
+                uint16_t timeout = 0;
+                while (Servo_IsMoving() && timeout < 150)
+                {
+                    vTaskDelay(pdMS_TO_TICKS(20));
+                    timeout++;
+                }
+            }
 
             action_play_idx++;
             if (action_play_idx >= *p_count)

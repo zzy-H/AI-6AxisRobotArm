@@ -24,6 +24,7 @@
  */
 
 #include "kinematic.h"
+#include "main.h"       // Servo_IsMoving 到位检测
 #include "uart.h"       // servo_target[] / stepper_target
 #include "auto_disp.h"  // g_target_color（颜色门控判断）
 #include "math.h"
@@ -224,6 +225,21 @@ volatile uint8_t g_auto_stop = 0;
 /* 停止锁存：1=已完全停止，状态机停住不动，直到重新选择颜色才解除 */
 volatile uint8_t g_auto_halt = 0;
 
+/*
+ * 等待所有舵机到位（带超时保护）
+ * 取代固定 vTaskDelay：角度差小就快进，角度差大就等完，卡住不死等
+ * timeout_ms：超时上限（默认 3000ms）
+ */
+static void Wait_Servo_Arrive(uint32_t timeout_ms)
+{
+    uint16_t timeout = 0;
+    while (Servo_IsMoving() && timeout < timeout_ms / 20)
+    {
+        vTaskDelay(pdMS_TO_TICKS(20));
+        timeout++;
+    }
+}
+
 void Arm_AutoGrab(Target_t *target)
 {
     static uint8_t state = ST_INIT;
@@ -292,7 +308,7 @@ void Arm_AutoGrab(Target_t *target)
             stepper_target = -g_stepper_pos;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(1000));  // 等待关节到位
+        Wait_Servo_Arrive(3000);   // 等舵机回初始姿态（替代固定延时）
         state = ST_ALIGN;
         break;
 
@@ -344,14 +360,14 @@ void Arm_AutoGrab(Target_t *target)
          */
         stepper_target = (int32_t)(-target->alpha * 2.22f);
 
-        vTaskDelay(pdMS_TO_TICKS(5000));  // 等待到位
+        Wait_Servo_Arrive(5000);   // 等舵机转到目标角度（替代固定延时）
         state = ST_GRAB;
         break;
 
     case ST_GRAB:
         /* 爪子闭合夹取 */
         servo_target[J_CLAW] = 172;   // 例程夹取角度
-        vTaskDelay(pdMS_TO_TICKS(500));
+        Wait_Servo_Arrive(2000);   // 等爪子闭合（替代固定延时）
         state = ST_LIFT;
         break;
 
@@ -368,14 +384,14 @@ void Arm_AutoGrab(Target_t *target)
          */
         stepper_target = -((400 - (int32_t)(100 * target->color)) - g_stepper_pos);
 
-        vTaskDelay(pdMS_TO_TICKS(800));
+        Wait_Servo_Arrive(3000);   // 等大臂抬起（替代固定延时）
         state = ST_RELEASE;
         break;
 
     case ST_RELEASE:
         /* 松开：爪子张开 */
         servo_target[J_CLAW] = 85;
-        vTaskDelay(pdMS_TO_TICKS(500));
+        Wait_Servo_Arrive(2000);   // 等爪子张开（替代固定延时）
         state = ST_HOME;
         break;
 
@@ -392,7 +408,7 @@ void Arm_AutoGrab(Target_t *target)
             stepper_target = -g_stepper_pos;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        Wait_Servo_Arrive(3000);   // 等舵机回位（替代固定延时）
         state = ST_INIT;   // 回到初始，等待下一次识别
         break;
     }
